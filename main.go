@@ -70,15 +70,15 @@ func main() {
 	}
 
 	// Add the readiness endpoint
-	mux.HandleFunc("GET /healthz", readinessHandler)
+	mux.HandleFunc("/api/healthz", readinessHandler)
 
 	// Add the metrics endpoint
-	mux.HandleFunc("GET /metrics", apiCfg.metricsHandler)
+	mux.HandleFunc("/api/metrics", apiCfg.metricsHandler)
 
 	// Add the reset endpoint
-	mux.HandleFunc("POST /reset", apiCfg.resetHandler)
+	mux.HandleFunc("/api/reset", apiCfg.resetHandler)
 
-	// Update the file server path to /app/ and wrap it with the middleware
+	// Keep the file server path at /app/ and wrap it with the middleware
 	fileServer := http.FileServer(http.Dir("./"))
 	mux.Handle("/app/", apiCfg.middlewareMetricsInc(http.StripPrefix("/app", fileServer)))
 
