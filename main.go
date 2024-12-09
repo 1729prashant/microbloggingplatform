@@ -1,8 +1,11 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"strings"
 	"sync/atomic"
 )
 
@@ -13,6 +16,55 @@ type apiConfig struct {
 	fileserverHits atomic.Int32
 }
 
+// Request and response structs for the validate_chirp endpoint
+type ValidateChirpRequest struct {
+	Body string `json:"body"`
+}
+
+type ValidateChirpResponse struct {
+	CleanedBody string `json:"cleaned_body"`
+}
+
+type ErrorResponse struct {
+	Error string `json:"error"`
+}
+
+// Helper function to respond with JSON
+func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
+	response, err := json.Marshal(payload)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Something went wrong")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	w.Write(response)
+}
+
+// Helper function to respond with error
+func respondWithError(w http.ResponseWriter, code int, msg string) {
+	respondWithJSON(w, code, ErrorResponse{Error: msg})
+}
+
+// Helper function to clean profane words from text
+func cleanChirp(body string) string {
+	profaneWords := map[string]bool{
+		"kerfuffle": true,
+		"sharbert":  true,
+		"fornax":    true,
+	}
+
+	words := strings.Split(body, " ")
+	for i, word := range words {
+		// Convert to lowercase for comparison, but keep original for non-matches
+		wordLower := strings.ToLower(word)
+		if profaneWords[wordLower] {
+			words[i] = "****"
+		}
+	}
+	return strings.Join(words, " ")
+}
+
 // Middleware to increment the fileserverHits counter
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -21,16 +73,58 @@ func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
 	})
 }
 
-// Handler to return the current request count as plain text (GET only)
+// Handler to validate and clean chirp
+func validateChirpHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		respondWithError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	// Read the request body
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Something went wrong")
+		return
+	}
+
+	// Parse the request body
+	var req ValidateChirpRequest
+	err = json.Unmarshal(body, &req)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Something went wrong")
+		return
+	}
+
+	// Validate chirp length
+	if len(req.Body) > 140 {
+		respondWithError(w, http.StatusBadRequest, "Chirp is too long")
+		return
+	}
+
+	// Clean the chirp text
+	cleanedBody := cleanChirp(req.Body)
+
+	// Return the cleaned chirp
+	respondWithJSON(w, http.StatusOK, ValidateChirpResponse{
+		CleanedBody: cleanedBody,
+	})
+}
+
+// Handler to return the metrics page as HTML
 func (cfg *apiConfig) metricsHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	hits := cfg.fileserverHits.Load() // Safely read the counter
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	hits := cfg.fileserverHits.Load()
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, "Hits: %d", hits)
+	fmt.Fprintf(w, `<html>
+  <body>
+    <h1>Welcome, Chirpy Admin</h1>
+    <p>Chirpy has been visited %d times!</p>
+  </body>
+</html>`, hits)
 }
 
 // Handler to reset the request count (POST only)
@@ -69,14 +163,11 @@ func main() {
 		Handler: mux,
 	}
 
-	// Add the readiness endpoint
+	// Add the API endpoints
 	mux.HandleFunc("/api/healthz", readinessHandler)
-
-	// Add the metrics endpoint
-	mux.HandleFunc("/api/metrics", apiCfg.metricsHandler)
-
-	// Add the reset endpoint
-	mux.HandleFunc("/api/reset", apiCfg.resetHandler)
+	mux.HandleFunc("/api/validate_chirp", validateChirpHandler)
+	mux.HandleFunc("/admin/metrics", apiCfg.metricsHandler)
+	mux.HandleFunc("/admin/reset", apiCfg.resetHandler)
 
 	// Keep the file server path at /app/ and wrap it with the middleware
 	fileServer := http.FileServer(http.Dir("./"))
