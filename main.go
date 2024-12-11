@@ -1,15 +1,19 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
+	"os"
 	"strings"
 	"sync/atomic"
 
-	//"github.com/1729prashant/blog-aggregator/internal/database"
+	"github.com/1729prashant/microbloggingplatform/internal/database"
 	//"github.com/google/uuid"
+	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 )
 
@@ -18,6 +22,7 @@ const HTTP_SERVER_PORT = "8080"
 // Struct to hold stateful, in-memory data
 type apiConfig struct {
 	fileserverHits atomic.Int32
+	db             *database.Queries
 }
 
 // Request and response structs for the validate_chirp endpoint
@@ -155,8 +160,22 @@ func readinessHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+
+	godotenv.Load()
+	dbURL := os.Getenv("DB_URL")
+	db, err := sql.Open("postgres", dbURL)
+	if err != nil {
+		log.Fatalf("Failed to connect to database: %v", err)
+	}
+	defer db.Close()
+
+	// Initialize database queries
+	dbQueries := database.New(db)
+
 	// Initialize apiConfig to hold stateful data
-	apiCfg := &apiConfig{}
+	apiCfg := &apiConfig{
+		db: dbQueries,
+	}
 
 	// Create a new ServeMux
 	mux := http.NewServeMux()
@@ -178,7 +197,7 @@ func main() {
 	mux.Handle("/app/", apiCfg.middlewareMetricsInc(http.StripPrefix("/app", fileServer)))
 
 	// Start the server
-	err := httpServer.ListenAndServe()
+	err = httpServer.ListenAndServe()
 	if err != nil {
 		panic(err) // Log error if the server fails to start
 	}
