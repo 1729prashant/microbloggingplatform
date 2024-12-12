@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/1729prashant/microbloggingplatform/internal/auth"
 	"github.com/1729prashant/microbloggingplatform/internal/database"
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
@@ -19,6 +20,134 @@ import (
 )
 
 const HTTP_SERVER_PORT = "8080"
+
+// Add these new types at the top with your other structs
+type BlogPost struct {
+	ID        uuid.UUID `json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Body      string    `json:"body"`
+	UserID    uuid.UUID `json:"user_id"`
+}
+
+type CreateBlogPostRequest struct {
+	Body   string    `json:"body"`
+	UserID uuid.UUID `json:"user_id"`
+}
+
+// Convert database.BlogPost to main.BlogPost
+func databaseBlogPostToBlogPost(dbBlogPost database.Blogpost) BlogPost {
+	return BlogPost{
+		ID:        dbBlogPost.ID,
+		CreatedAt: dbBlogPost.CreatedAt,
+		UpdatedAt: dbBlogPost.UpdatedAt,
+		Body:      dbBlogPost.Body,
+		UserID:    dbBlogPost.UserID,
+	}
+}
+
+// New handler for creating BlogPosts
+func (cfg *apiConfig) createBlogPostHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		respondWithError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to read request body")
+		return
+	}
+
+	var req CreateBlogPostRequest
+	err = json.Unmarshal(body, &req)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	// Validate BlogPost length
+	if len(req.Body) > 140 {
+		respondWithError(w, http.StatusBadRequest, "BlogPost is too long")
+		return
+	}
+
+	// Clean the BlogPost text using the existing cleanBlogPost function
+	cleanedBody := cleanChirp(req.Body)
+
+	// Create the BlogPost
+	dbBlogPost, err := cfg.db.CreateBlogPost(r.Context(), database.CreateBlogPostParams{
+		Body:   cleanedBody,
+		UserID: req.UserID,
+	})
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to create BlogPost")
+		return
+	}
+
+	// Convert and respond with the BlogPost
+	BlogPost := databaseBlogPostToBlogPost(dbBlogPost)
+	respondWithJSON(w, http.StatusCreated, BlogPost)
+}
+
+// Handler for fetching all BlogPosts
+func (cfg *apiConfig) GetAllBlogPostsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		respondWithError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	// Create the BlogPost
+	dbBlogPosts, err := cfg.db.GetAllBlogPosts(r.Context())
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to fetch posts")
+		return
+	}
+
+	blogPostsResponse := make([]BlogPost, len(dbBlogPosts))
+	for i, post := range dbBlogPosts {
+		blogPostsResponse[i] = databaseBlogPostToBlogPost(post)
+	}
+
+	respondWithJSON(w, http.StatusOK, blogPostsResponse)
+
+}
+
+// In your main.go, add this new handler
+func (cfg *apiConfig) getChirpByIDHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		respondWithError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	chirpID := strings.TrimPrefix(r.URL.Path, "/api/chirps/")
+	if chirpID == "" {
+		respondWithError(w, http.StatusBadRequest, "Missing chirp ID")
+		return
+	}
+
+	// Parse the UUID
+	chirpUUID, err := uuid.Parse(chirpID)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid chirp ID")
+		return
+	}
+
+	// Get the chirp from the database
+	dbBlogPost, err := cfg.db.GetBlogPost(r.Context(), chirpUUID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			respondWithError(w, http.StatusNotFound, "Chirp not found")
+			return
+		}
+		respondWithError(w, http.StatusInternalServerError, "Failed to fetch chirp")
+		return
+	}
+
+	// Convert and respond with the chirp
+	chirp := databaseBlogPostToBlogPost(dbBlogPost)
+	respondWithJSON(w, http.StatusOK, chirp)
+}
 
 // User struct for JSON responses
 type User struct {
@@ -37,7 +166,8 @@ type apiConfig struct {
 
 // Request structs
 type CreateUserRequest struct {
-	Email string `json:"email"`
+	Email          string `json:"email"`
+	HashedPassword string `json:"hashed_password"`
 }
 
 // Convert database.User to main.User
@@ -75,7 +205,17 @@ func (cfg *apiConfig) createUserHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	dbUser, err := cfg.db.CreateUser(r.Context(), req.Email)
+	encryptedPassword, err := auth.HashPassword(req.HashedPassword)
+
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to set password")
+		return
+	}
+
+	dbUser, err := cfg.db.CreateUser(r.Context(), database.CreateUserParams{
+		Email:          req.Email,
+		HashedPassword: encryptedPassword,
+	})
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Failed to create user")
 		return
@@ -84,19 +224,6 @@ func (cfg *apiConfig) createUserHandler(w http.ResponseWriter, r *http.Request) 
 	user := databaseUserToUser(dbUser)
 	respondWithJSON(w, http.StatusCreated, user)
 }
-
-/* Handler to reset the request count (POST only)
-func (cfg *apiConfig) resetHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
-	}
-	cfg.fileserverHits.Store(0) // Safely reset the counter
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("Hits counter reset to 0"))
-}
-*/
 
 // Updated reset handler with user deletion
 func (cfg *apiConfig) resetHandler(w http.ResponseWriter, r *http.Request) {
@@ -183,43 +310,6 @@ func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
 	})
 }
 
-// Handler to validate and clean chirp
-func validateChirpHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		respondWithError(w, http.StatusMethodNotAllowed, "Method not allowed")
-		return
-	}
-
-	// Read the request body
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Something went wrong")
-		return
-	}
-
-	// Parse the request body
-	var req ValidateChirpRequest
-	err = json.Unmarshal(body, &req)
-	if err != nil {
-		respondWithError(w, http.StatusBadRequest, "Something went wrong")
-		return
-	}
-
-	// Validate chirp length
-	if len(req.Body) > 140 {
-		respondWithError(w, http.StatusBadRequest, "Chirp is too long")
-		return
-	}
-
-	// Clean the chirp text
-	cleanedBody := cleanChirp(req.Body)
-
-	// Return the cleaned chirp
-	respondWithJSON(w, http.StatusOK, ValidateChirpResponse{
-		CleanedBody: cleanedBody,
-	})
-}
-
 // Handler to return the metrics page as HTML
 func (cfg *apiConfig) metricsHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -280,7 +370,45 @@ func main() {
 
 	// Add the API endpoints
 	mux.HandleFunc("/api/healthz", readinessHandler)
-	mux.HandleFunc("/api/validate_chirp", validateChirpHandler)
+	mux.HandleFunc("/api/chirps", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			apiCfg.GetAllBlogPostsHandler(w, r)
+		case http.MethodPost:
+			apiCfg.createBlogPostHandler(w, r)
+		default:
+			respondWithError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		}
+	})
+	mux.HandleFunc("/api/chirps/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/chirps/" {
+			switch r.Method {
+			case http.MethodGet:
+				apiCfg.GetAllBlogPostsHandler(w, r)
+			case http.MethodPost:
+				apiCfg.createBlogPostHandler(w, r)
+			default:
+				respondWithError(w, http.StatusMethodNotAllowed, "Method not allowed")
+			}
+			return
+		}
+
+		// Only proceed if it's a GET request for a specific chirp
+		if r.Method != http.MethodGet {
+			respondWithError(w, http.StatusMethodNotAllowed, "Method not allowed")
+			return
+		}
+
+		chirpID := strings.TrimPrefix(r.URL.Path, "/api/chirps/")
+
+		if chirpID == "" {
+			respondWithError(w, http.StatusBadRequest, "Missing chirp ID")
+			return
+		}
+
+		apiCfg.getChirpByIDHandler(w, r)
+	})
+
 	mux.HandleFunc("/api/users", apiCfg.createUserHandler)
 	mux.HandleFunc("/admin/metrics", apiCfg.metricsHandler)
 	mux.HandleFunc("/admin/reset", apiCfg.resetHandler)
