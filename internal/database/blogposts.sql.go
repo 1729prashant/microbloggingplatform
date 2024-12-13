@@ -95,9 +95,43 @@ func (q *Queries) GetAllBlogPosts(ctx context.Context) ([]Blogpost, error) {
 	return items, nil
 }
 
+const getAllBlogPostsDesc = `-- name: GetAllBlogPostsDesc :many
+
+
+SELECT id, created_at, updated_at, body, user_id FROM blogposts
+ORDER BY created_at DESC
+`
+
+func (q *Queries) GetAllBlogPostsDesc(ctx context.Context) ([]Blogpost, error) {
+	rows, err := q.db.QueryContext(ctx, getAllBlogPostsDesc)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Blogpost
+	for rows.Next() {
+		var i Blogpost
+		if err := rows.Scan(
+			&i.ID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Body,
+			&i.UserID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getBlogPost = `-- name: GetBlogPost :one
-
-
 
 SELECT id, created_at, updated_at, body, user_id 
 FROM blogposts 
@@ -116,4 +150,79 @@ func (q *Queries) GetBlogPost(ctx context.Context, id uuid.UUID) (Blogpost, erro
 		&i.UserID,
 	)
 	return i, err
+}
+
+const getBlogPostsAsc = `-- name: GetBlogPostsAsc :many
+
+
+SELECT id, created_at, updated_at, body, user_id
+FROM blogposts
+WHERE user_id = $1
+ORDER BY created_at ASC
+`
+
+func (q *Queries) GetBlogPostsAsc(ctx context.Context, userID uuid.UUID) ([]Blogpost, error) {
+	rows, err := q.db.QueryContext(ctx, getBlogPostsAsc, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Blogpost
+	for rows.Next() {
+		var i Blogpost
+		if err := rows.Scan(
+			&i.ID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Body,
+			&i.UserID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getBlogPostsDesc = `-- name: GetBlogPostsDesc :many
+
+SELECT id, created_at, updated_at, body, user_id
+FROM blogposts
+WHERE user_id = $1
+ORDER BY created_at DESC
+`
+
+func (q *Queries) GetBlogPostsDesc(ctx context.Context, userID uuid.UUID) ([]Blogpost, error) {
+	rows, err := q.db.QueryContext(ctx, getBlogPostsDesc, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Blogpost
+	for rows.Next() {
+		var i Blogpost
+		if err := rows.Scan(
+			&i.ID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Body,
+			&i.UserID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

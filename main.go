@@ -109,20 +109,98 @@ func (cfg *apiConfig) GetAllBlogPostsHandler(w http.ResponseWriter, r *http.Requ
 		respondWithError(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
+	/*
+		// Create the BlogPost
+		dbBlogPosts, err := cfg.db.GetAllBlogPosts(r.Context())
+		if err != nil {
+			respondWithError(w, http.StatusInternalServerError, "Failed to fetch posts")
+			return
+		}
 
-	// Create the BlogPost
-	dbBlogPosts, err := cfg.db.GetAllBlogPosts(r.Context())
-	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Failed to fetch posts")
+		blogPostsResponse := make([]BlogPost, len(dbBlogPosts))
+		for i, post := range dbBlogPosts {
+			blogPostsResponse[i] = databaseBlogPostToBlogPost(post)
+		}
+	*/
+
+	// Extract query parameters
+	authorIDStr := r.URL.Query().Get("author_id")
+	sortOrder := r.URL.Query().Get("sort")
+
+	// Default to "asc" if no sort parameter is provided
+	if sortOrder == "" {
+		sortOrder = "asc"
+	}
+
+	// Validate sortOrder to ensure it's either 'asc' or 'desc'
+	if sortOrder != "asc" && sortOrder != "desc" {
+		respondWithError(w, http.StatusBadRequest, "Invalid sort value")
 		return
 	}
 
-	blogPostsResponse := make([]BlogPost, len(dbBlogPosts))
-	for i, post := range dbBlogPosts {
-		blogPostsResponse[i] = databaseBlogPostToBlogPost(post)
+	// Convert author_id to UUID if present
+	var authorID uuid.UUID
+	if authorIDStr != "" {
+		parsedID, err := uuid.Parse(authorIDStr)
+		if err != nil {
+			respondWithError(w, http.StatusBadRequest, "Invalid author_id format")
+			return
+		}
+		authorID = parsedID
 	}
 
-	respondWithJSON(w, http.StatusOK, blogPostsResponse)
+	// Fetch blogposts from the database, passing authorID and sortOrder
+	if sortOrder == "desc" && authorIDStr != "" {
+		dbBlogPosts, err := cfg.db.GetBlogPostsDesc(r.Context(), authorID)
+		if err != nil {
+			respondWithError(w, http.StatusInternalServerError, "Failed to fetch chirps")
+			return
+		}
+		blogPostsResponse := make([]BlogPost, len(dbBlogPosts))
+		for i, post := range dbBlogPosts {
+			blogPostsResponse[i] = databaseBlogPostToBlogPost(post)
+		}
+		respondWithJSON(w, http.StatusOK, blogPostsResponse)
+
+	}
+	if (sortOrder == "asc" || sortOrder == "") && authorIDStr != "" {
+		dbBlogPosts, err := cfg.db.GetBlogPostsAsc(r.Context(), authorID)
+		if err != nil {
+			respondWithError(w, http.StatusInternalServerError, "Failed to fetch chirps")
+			return
+		}
+		blogPostsResponse := make([]BlogPost, len(dbBlogPosts))
+		for i, post := range dbBlogPosts {
+			blogPostsResponse[i] = databaseBlogPostToBlogPost(post)
+		}
+		respondWithJSON(w, http.StatusOK, blogPostsResponse)
+	}
+
+	if sortOrder == "desc" && authorIDStr == "" {
+		dbBlogPosts, err := cfg.db.GetAllBlogPostsDesc(r.Context())
+		if err != nil {
+			respondWithError(w, http.StatusInternalServerError, "Failed to fetch chirps")
+			return
+		}
+		blogPostsResponse := make([]BlogPost, len(dbBlogPosts))
+		for i, post := range dbBlogPosts {
+			blogPostsResponse[i] = databaseBlogPostToBlogPost(post)
+		}
+		respondWithJSON(w, http.StatusOK, blogPostsResponse)
+
+	}
+	if (sortOrder == "asc" || sortOrder == "") && authorIDStr == "" {
+		dbBlogPosts, err := cfg.db.GetAllBlogPosts(r.Context())
+		if err != nil {
+			respondWithError(w, http.StatusInternalServerError, "Failed to fetch chirps")
+			return
+		}
+		blogPostsResponse := make([]BlogPost, len(dbBlogPosts))
+		for i, post := range dbBlogPosts {
+			blogPostsResponse[i] = databaseBlogPostToBlogPost(post)
+		}
+		respondWithJSON(w, http.StatusOK, blogPostsResponse)
+	}
 
 }
 
