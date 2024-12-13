@@ -41,6 +41,23 @@ func (q *Queries) CreateBlogPost(ctx context.Context, arg CreateBlogPostParams) 
 	return i, err
 }
 
+const deleteBlogPost = `-- name: DeleteBlogPost :exec
+
+
+DELETE FROM blogposts
+WHERE id = $1 AND user_id = $2
+`
+
+type DeleteBlogPostParams struct {
+	ID     uuid.UUID
+	UserID uuid.UUID
+}
+
+func (q *Queries) DeleteBlogPost(ctx context.Context, arg DeleteBlogPostParams) error {
+	_, err := q.db.ExecContext(ctx, deleteBlogPost, arg.ID, arg.UserID)
+	return err
+}
+
 const getAllBlogPosts = `-- name: GetAllBlogPosts :many
 
 

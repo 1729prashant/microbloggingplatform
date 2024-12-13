@@ -25,3 +25,9 @@ FROM blogposts
 WHERE id = $1 
 LIMIT 1;
 --
+
+
+-- name: DeleteBlogPost :exec
+DELETE FROM blogposts
+WHERE id = $1 AND user_id = $2;
+--

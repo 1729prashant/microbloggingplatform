@@ -95,3 +95,20 @@ func MakeRefreshToken() (string, error) {
 	}
 	return hex.EncodeToString(tokenBytes), nil
 }
+
+// GetAPIKey extracts the API key from the Authorization header.
+func GetAPIKey(headers http.Header) (string, error) {
+	authHeader := headers.Get("Authorization")
+	if authHeader == "" {
+		return "", errors.New("Authorization header is missing")
+	}
+
+	// Check if the Authorization header starts with "ApiKey"
+	if !strings.HasPrefix(authHeader, "ApiKey ") {
+		return "", errors.New("Authorization header is malformed")
+	}
+
+	// Strip "ApiKey " and return the remaining part (the actual API key)
+	apiKey := strings.TrimSpace(strings.TrimPrefix(authHeader, "ApiKey "))
+	return apiKey, nil
+}
