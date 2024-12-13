@@ -13,3 +13,9 @@ RETURNING *;
 -- name: DeleteAllUsers :exec
 DELETE FROM users;
 --
+
+-- name: GetEncryptedPassword :one
+SELECT hashed_password, id, created_at, updated_at, email FROM users 
+WHERE email = $1
+LIMIT 1;
+--

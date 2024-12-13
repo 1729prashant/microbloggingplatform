@@ -166,8 +166,8 @@ type apiConfig struct {
 
 // Request structs
 type CreateUserRequest struct {
-	Email          string `json:"email"`
-	HashedPassword string `json:"hashed_password"`
+	Email    string `json:"email"`
+	Password string `json:"password"`
 }
 
 // Convert database.User to main.User
@@ -205,16 +205,15 @@ func (cfg *apiConfig) createUserHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	encryptedPassword, err := auth.HashPassword(req.HashedPassword)
-
+	hashedPassword, err := auth.HashPassword(req.Password)
 	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Failed to set password")
+		respondWithError(w, http.StatusInternalServerError, "Failed to hash password")
 		return
 	}
 
 	dbUser, err := cfg.db.CreateUser(r.Context(), database.CreateUserParams{
 		Email:          req.Email,
-		HashedPassword: encryptedPassword,
+		HashedPassword: hashedPassword,
 	})
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Failed to create user")
@@ -338,6 +337,58 @@ func readinessHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("OK"))
 }
 
+func (cfg *apiConfig) loginHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		respondWithError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to read request body")
+		return
+	}
+
+	var req CreateUserRequest
+	err = json.Unmarshal(body, &req)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	/*
+		if req.Email == "" {
+			respondWithError(w, http.StatusBadRequest, "Email is required")
+			return
+		}
+
+		encryptedPassword, err := auth.HashPassword(req.HashedPassword)
+		if err != nil {
+			respondWithError(w, http.StatusInternalServerError, "Failed to encrypt password")
+			return
+		}
+	*/
+	dbUser, err := cfg.db.GetEncryptedPassword(r.Context(), req.Email)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to create user")
+		return
+	}
+
+	// Check password
+	if err := auth.CheckPasswordHash(req.Password, dbUser.HashedPassword); err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Incorrect email or password")
+		return
+	}
+
+	user := databaseUserToUser(database.User{
+		ID:        dbUser.ID,
+		CreatedAt: dbUser.CreatedAt,
+		UpdatedAt: dbUser.UpdatedAt,
+		Email:     dbUser.Email,
+	})
+	respondWithJSON(w, http.StatusOK, user)
+}
+
 func main() {
 
 	godotenv.Load()
@@ -410,6 +461,7 @@ func main() {
 	})
 
 	mux.HandleFunc("/api/users", apiCfg.createUserHandler)
+	mux.HandleFunc("/api/login", apiCfg.loginHandler)
 	mux.HandleFunc("/admin/metrics", apiCfg.metricsHandler)
 	mux.HandleFunc("/admin/reset", apiCfg.resetHandler)
 
