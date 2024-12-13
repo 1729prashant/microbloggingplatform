@@ -1,4 +1,4 @@
-#Microblogging Platform in Go
+# Microblogging Platform in Go
 
 This is a microblogging platform designed with modern APIs, secure authentication, and extensibility. Users can post, delete, and manage "chirps" (short messages), as well as benefit from premium features such as "Chirpy Red" membership.
 
